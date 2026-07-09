@@ -16,15 +16,14 @@ pipeline {
         EC2_HOST        = '34.239.116.186'
         EC2_USER        = 'ubuntu'
         CONTAINER_NAME  = 'my-running-app'
-        GITHUB_REPO     = 'a_y/cd' 
     }
 
     stages {
         stage('Install Tools in Agent') {
             steps {
                 script {
-                    echo "Ensuring Docker CLI, AWS CLI and curl are available in the agent environment..."
-                    sh "apt-get update && apt-get install -y docker.io awscli curl"
+                    echo "Ensuring Docker CLI and AWS CLI are available in the agent environment..."
+                    sh "apt-get update && apt-get install -y docker.io awscli"
                 }
             }
         }
@@ -78,25 +77,14 @@ pipeline {
             }
         }
 
-        stage('Report Success to GitHub') {
+        stage('Notify GitHub Success') {
             when {
-                expression { env.GIT_COMMIT != null && env.GIT_COMMIT != '' }
+                expression { (env.CHANGE_ID != null && env.CHANGE_ID != '') || env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' }
             }
             steps {
                 script {
-                    echo "Reporting SUCCESS status to GitHub commit..."
-                    withCredentials([usernamePassword(credentialsId: 'github-token', 
-                                                      usernameVariable: 'GH_USER_UNUSED', 
-                                                      passwordVariable: 'GH_TOKEN')]) {
-                        // תיקון: העברת הטוקן בבטחה ומניעת בעיות אינטרפולציה של ה-SHA על ידי שימוש במשתנה סביבה פנימי
-                        sh '''
-                            curl -X POST \
-                            -H "Authorization: token $GH_TOKEN" \
-                            -H "Accept: application/vnd.github.v3+json" \
-                            https://api.github.com/repos/${GITHUB_REPO}/statuses/${GIT_COMMIT} \
-                            -d '{"state": "success", "target_url": "'"${BUILD_URL}"'", "description": "Build, tests and push passed successfully!", "context": "col_app_pipeline"}'
-                        '''
-                    }
+                    echo "Notifying GitHub that the build and tests have passed..."
+                    githubNotify status: 'SUCCESS', description: 'Build, Tests, ECR & Deploy Passed!', context: 'col_app_pipeline'
                 }
             }
         }
@@ -132,22 +120,10 @@ pipeline {
         }
         failure {
             script {
-                if (env.GIT_COMMIT != null && env.GIT_COMMIT != '') {
-                    try {
-                        withCredentials([usernamePassword(credentialsId: 'github-token', 
-                                                          usernameVariable: 'GH_USER_UNUSED', 
-                                                          passwordVariable: 'GH_TOKEN')]) {
-                            sh '''
-                                curl -X POST \
-                                -H "Authorization: token $GH_TOKEN" \
-                                -H "Accept: application/vnd.github.v3+json" \
-                                https://api.github.com/repos/${GITHUB_REPO}/statuses/${GIT_COMMIT} \
-                                -d '{"state": "failure", "target_url": "'"${BUILD_URL}"'", "description": "Pipeline or tests failed!", "context": "col_app_pipeline"}'
-                            '''
-                        }
-                    } catch(Exception e) {
-                        echo "Failed to report failure status: ${e.message}"
-                    }
+                try {
+                    githubNotify status: 'FAILURE', description: 'Pipeline failed at some stage!', context: 'cd_practise_multy'
+                } catch(Exception e) {
+                    echo "Could not send failure notification: ${e.message}"
                 }
             }
             echo 'Pipeline failed!'
