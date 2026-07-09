@@ -16,8 +16,6 @@ pipeline {
         EC2_HOST        = '34.239.116.186'
         EC2_USER        = 'ubuntu'
         CONTAINER_NAME  = 'my-running-app'
-        
-        // פרטי הריפו בגיטהאב (שנה במידת הצורך למבנה ה-owner/repo שלך)
         GITHUB_REPO     = 'a_y/cd' 
     }
 
@@ -87,8 +85,10 @@ pipeline {
             steps {
                 script {
                     echo "Reporting SUCCESS status to GitHub commit ${env.GIT_COMMIT}..."
-                    // שימוש בטוקן גיטהאב מתוך ה-Credentials בג'נקינס (וודא שה-ID הוא github-token)
-                    withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                    // התאמה לסוג ה-Credential: Username with password (משתמש וסיסמה שבה הסיסמה היא הטוקן)
+                    withCredentials([usernamePassword(credentialsId: 'github-token', 
+                                                      usernameVariable: 'GH_USER_UNUSED', 
+                                                      passwordVariable: 'GH_TOKEN')]) {
                         sh """
                             curl -X POST \
                             -H "Authorization: token ${GH_TOKEN}" \
@@ -108,7 +108,7 @@ pipeline {
             steps {
                 script {
                     echo "Deploying the latest image to Production EC2 host..."
-                    withCredentials([file(credentialsId: 'b7943e0f-cf0c-4a33-8d0f-eda0073045d8', variable: 'SSH_KEY_FILE')]) {
+                    withCredentials([file(credentialsId: 'ssh-key-ec2', variable: 'SSH_KEY_FILE')]) {
                         sh """
                             chmod 600 \$SSH_KEY_FILE
                             ssh -i \$SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "\
@@ -132,10 +132,11 @@ pipeline {
         }
         failure {
             script {
-                // דיווח כישלון לגיטהאב במידה והבילד או הטסטים נופלים
                 if (env.GIT_COMMIT != null && env.GIT_COMMIT != '') {
                     try {
-                        withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                        withCredentials([usernamePassword(credentialsId: 'github-token', 
+                                                          usernameVariable: 'GH_USER_UNUSED', 
+                                                          passwordVariable: 'GH_TOKEN')]) {
                             sh """
                                 curl -X POST \
                                 -H "Authorization: token ${GH_TOKEN}" \
@@ -150,9 +151,6 @@ pipeline {
                 }
             }
             echo 'Pipeline failed!'
-        }
-        success {
-            echo 'Pipeline completed successfully!'
         }
     }
 }
