@@ -103,7 +103,7 @@ pipeline {
             steps {
                 script {
                     echo "Deploying the latest image to Production EC2 host..."
-                    withCredentials([file(credentialsId: 'b7943e0f-cf0c-4a33-8d0f-eda0073045d8', variable: 'SSH_KEY_FILE')]) {
+                    withCredentials([file(credentialsId: 'ssh-key-ec2', variable: 'SSH_KEY_FILE')]) {
                         sh """
                             chmod 600 \$SSH_KEY_FILE
                             ssh -i \$SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "\
