@@ -16,13 +16,16 @@ pipeline {
         EC2_HOST        = '34.239.116.186'
         EC2_USER        = 'ubuntu'
         CONTAINER_NAME  = 'my-running-app'
+        
+        // פרטי הריפו בגיטהאב (שנה במידת הצורך למבנה ה-owner/repo שלך)
+        GITHUB_REPO     = 'a_y/cd' 
     }
 
     stages {
         stage('Install Tools in Agent') {
             steps {
                 script {
-                    echo "Ensuring Docker CLI and AWS CLI are available in the agent environment..."
+                    echo "Ensuring Docker CLI, AWS CLI and curl are available in the agent environment..."
                     sh "apt-get update && apt-get install -y docker.io awscli curl"
                 }
             }
@@ -77,16 +80,23 @@ pipeline {
             }
         }
 
-        stage('Notify GitHub PR Success') {
+        stage('Report Success to GitHub') {
             when {
-                expression { env.CHANGE_ID != null && env.CHANGE_ID != '' }
+                expression { env.GIT_COMMIT != null && env.GIT_COMMIT != '' }
             }
             steps {
                 script {
-                    echo "Notifying GitHub PR status via API..."
-                    // אם יש לך טוקן גיטהאב מוגדר כ-Credential בג'נקינס, תוכל לשלב אותו כאן.
-                    // כפתרון מהיר ובטוח שרץ ישירות מתוך הסביבה:
-                    echo "GitHub PR #${env.CHANGE_ID} verified successfully."
+                    echo "Reporting SUCCESS status to GitHub commit ${env.GIT_COMMIT}..."
+                    // שימוש בטוקן גיטהאב מתוך ה-Credentials בג'נקינס (וודא שה-ID הוא github-token)
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                        sh """
+                            curl -X POST \
+                            -H "Authorization: token ${GH_TOKEN}" \
+                            -H "Accept: application/vnd.github.v3+json" \
+                            https://api.github.com/repos/${GITHUB_REPO}/statuses/${env.GIT_COMMIT} \
+                            -d '{"state": "success", "target_url": "${env.BUILD_URL}", "description": "Build, tests and push passed successfully!", "context": "col_app_pipeline"}'
+                        """
+                    }
                 }
             }
         }
@@ -98,7 +108,7 @@ pipeline {
             steps {
                 script {
                     echo "Deploying the latest image to Production EC2 host..."
-                    withCredentials([file(credentialsId: 'ssh-key-ec2', variable: 'SSH_KEY_FILE')]) {
+                    withCredentials([file(credentialsId: 'b7943e0f-cf0c-4a33-8d0f-eda0073045d8', variable: 'SSH_KEY_FILE')]) {
                         sh """
                             chmod 600 \$SSH_KEY_FILE
                             ssh -i \$SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "\
@@ -120,11 +130,29 @@ pipeline {
         always {
             archiveArtifacts artifacts: '*_test_results.txt', allowEmptyArchive: true
         }
-        success {
-            echo 'Pipeline (CI/CD) completed successfully!'
-        }
         failure {
+            script {
+                // דיווח כישלון לגיטהאב במידה והבילד או הטסטים נופלים
+                if (env.GIT_COMMIT != null && env.GIT_COMMIT != '') {
+                    try {
+                        withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                            sh """
+                                curl -X POST \
+                                -H "Authorization: token ${GH_TOKEN}" \
+                                -H "Accept: application/vnd.github.v3+json" \
+                                https://api.github.com/repos/${GITHUB_REPO}/statuses/${env.GIT_COMMIT} \
+                                -d '{"state": "failure", "target_url": "${env.BUILD_URL}", "description": "Pipeline or tests failed!", "context": "col_app_pipeline"}'
+                            """
+                        }
+                    } catch(Exception e) {
+                        echo "Failed to report failure status: ${e.message}"
+                    }
+                }
+            }
             echo 'Pipeline failed!'
+        }
+        success {
+            echo 'Pipeline completed successfully!'
         }
     }
 }
