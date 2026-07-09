@@ -84,7 +84,7 @@ pipeline {
             steps {
                 script {
                     echo "Notifying GitHub that the build and tests have passed..."
-                    githubNotify status: 'SUCCESS', description: 'Build, Tests, ECR & Deploy Passed!', context: 'cd_practise_multy'
+                    githubNotify status: 'SUCCESS', description: 'Build, Tests, ECR & Deploy Passed!', context: 'col_app_pipeline'
                 }
             }
         }
