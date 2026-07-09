@@ -8,7 +8,6 @@ pipeline {
     
     environment {
         REPOSITORY_NAME = 'a_y/cd'
-        // יצירת תג ייחודי המבוסס על מספר הבילד הנוכחי בג'נקינס
         IMAGE_TAG       = "v-${env.BUILD_NUMBER}"
     }
 
@@ -26,10 +25,20 @@ pipeline {
             steps {
                 script {
                     echo "Building Docker image with tag ${IMAGE_TAG} and latest..."
-                    // בניה ראשונית עם התג הייחודי
                     sh "docker build --no-cache -t ${REPOSITORY_NAME}:${IMAGE_TAG} ."
-                    // יצירת תג נוסף (Alias) בתור latest
                     sh "docker tag ${REPOSITORY_NAME}:${IMAGE_TAG} ${REPOSITORY_NAME}:latest"
+                }
+            }
+        }
+
+        stage('Run Tests (Unit & Integration)') {
+            steps {
+                script {
+                    echo "Running unit and integration tests inside the container..."
+                    // הרצת בדיקות היחידה (Unit Tests)
+                    sh "docker run --rm ${REPOSITORY_NAME}:${IMAGE_TAG} python -m unittest test_calculator_logic.py"
+                    // הרצת בדיקות האינטגרציה הקלות (Integration Tests)
+                    sh "docker run --rm ${REPOSITORY_NAME}:${IMAGE_TAG} python -m unittest test_calculator_app_integration.py"
                 }
             }
         }
@@ -37,10 +46,10 @@ pipeline {
     
     post {
         success {
-            echo 'Build and tagging completed successfully!'
+            echo 'Build and all tests completed successfully!'
         }
         failure {
-            echo 'Build stage failed!'
+            echo 'Build or tests failed!'
         }
     }
 }
