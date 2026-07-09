@@ -16,14 +16,15 @@ pipeline {
         EC2_HOST        = '44.202.91.190'
         EC2_USER        = 'ubuntu'
         CONTAINER_NAME  = 'my-running-app'
+        APP_PORT        = '5000'
     }
 
     stages {
         stage('Install Tools in Agent') {
             steps {
                 script {
-                    echo "Ensuring Docker CLI and AWS CLI are available in the agent environment..."
-                    sh "apt-get update && apt-get install -y docker.io awscli"
+                    echo "Ensuring Docker CLI, AWS CLI and curl are available in the agent environment..."
+                    sh "apt-get update && apt-get install -y docker.io awscli curl"
                 }
             }
         }
@@ -84,7 +85,7 @@ pipeline {
             steps {
                 script {
                     echo "Notifying GitHub that the build and tests have passed..."
-                    githubNotify status: 'SUCCESS', description: 'Build, Tests, ECR & Deploy Passed!', context: 'col_app_pipeline'
+                    githubNotify status: 'SUCCESS', description: 'Build, Tests, ECR & Deploy Passed!', context: 'cd_practise_multy'
                 }
             }
         }
@@ -95,20 +96,62 @@ pipeline {
             }
             steps {
                 script {
-                    echo "Deploying the latest image to Production EC2 host..."
-                    withCredentials([file(credentialsId: 'ssh-key-ec2', variable: 'SSH_KEY_FILE')]) {
+                    echo "Deploying image using agent-side ECR login and remote execution..."
+                    withCredentials([
+                        usernamePassword(credentialsId: 'aws-access-key', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY'),
+                        file(credentialsId: 'ssh-key-ec2', variable: 'SSH_KEY_FILE')
+                    ]) {
+                        // מבצעים את ה-Login ל-ECR באג'נט, ומעבירים את הטוקן והאימג' לשרת המרוחק בצורה נקייה
                         sh """
                             chmod 600 \$SSH_KEY_FILE
+                            # קבלת סיסמת ECR מהאג'נט ויצירת פקודת רץ מרוחקת שאינה תלויה ב-AWS CLI על השרת
+                            ECR_PASSWORD=\$(aws ecr get-login-password --region ${AWS_REGION})
+                            
                             ssh -i \$SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "\
-                                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${REGISTRY_URL} && \
+                                echo '${ECR_PASSWORD}' | docker login --username AWS --password-stdin ${REGISTRY_URL} && \
                                 docker pull ${REGISTRY_URL}/${REPOSITORY_NAME}:latest && \
                                 docker stop ${CONTAINER_NAME} || true && \
                                 docker rm ${CONTAINER_NAME} || true && \
-                                docker run -d --name ${CONTAINER_NAME} -p 5000:5000 ${REGISTRY_URL}/${REPOSITORY_NAME}:latest \
+                                docker run -d --name ${CONTAINER_NAME} -p ${APP_PORT}:${APP_PORT} ${REGISTRY_URL}/${REPOSITORY_NAME}:latest \
                             "
                         """
                     }
-                    echo "Deployment completed successfully. New release is now live!"
+                    echo "Deployment completed successfully!"
+                }
+            }
+        }
+
+        stage('Health Verification') {
+            when {
+                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' }
+            }
+            steps {
+                script {
+                    echo "Probing service health endpoint with retries and backoff..."
+                    withCredentials([file(credentialsId: 'ssh-key-ec2', variable: 'SSH_KEY_FILE')]) {
+                        // לולאת בדיקת בריאות עם עד 5 ניסיונות והמתנה (Backoff) של 5 שניות
+                        sh """
+                            chmod 600 \$SSH_KEY_FILE
+                            ssh -i \$SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
+                                max_attempts=5
+                                delay=5
+                                attempt=1
+                                while [ \$attempt -le \$max_attempts ]; do
+                                    echo "Health check attempt \$attempt of \$max_attempts..."
+                                    response=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${APP_PORT}/health || echo "000")
+                                    if [ "\$response" -eq 200 ]; then
+                                        echo "Health check passed successfully with HTTP 200!"
+                                        exit 0
+                                    fi
+                                    echo "Service not ready yet (HTTP status: \$response). Retrying in \$delay seconds..."
+                                    sleep \$delay
+                                    attempt=\$((attempt + 1))
+                                done
+                                echo "Health check FAILED after \$max_attempts attempts."
+                                exit 1
+                            '
+                        """
+                    }
                 }
             }
         }
@@ -121,7 +164,7 @@ pipeline {
         failure {
             script {
                 try {
-                    githubNotify status: 'FAILURE', description: 'Pipeline failed at some stage!', context: 'cd_practise_multy'
+                    githubNotify status: 'FAILURE', description: 'Pipeline or Health Check failed!', context: 'cd_practise_multy'
                 } catch(Exception e) {
                     echo "Could not send failure notification: ${e.message}"
                 }
