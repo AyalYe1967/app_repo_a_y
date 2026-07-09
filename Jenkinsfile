@@ -8,6 +8,8 @@ pipeline {
     
     environment {
         REPOSITORY_NAME = 'a_y/cd'
+        // יצירת תג ייחודי המבוסס על מספר הבילד הנוכחי בג'נקינס
+        IMAGE_TAG       = "v-${env.BUILD_NUMBER}"
     }
 
     stages {
@@ -20,11 +22,14 @@ pipeline {
             }
         }
 
-        stage('Build Initial Docker Image') {
+        stage('Build Docker Image with Tags') {
             steps {
                 script {
-                    echo "Building temporary Docker image for calculator app..."
-                    sh "docker build --no-cache -t ${REPOSITORY_NAME}:latest ."
+                    echo "Building Docker image with tag ${IMAGE_TAG} and latest..."
+                    // בניה ראשונית עם התג הייחודי
+                    sh "docker build --no-cache -t ${REPOSITORY_NAME}:${IMAGE_TAG} ."
+                    // יצירת תג נוסף (Alias) בתור latest
+                    sh "docker tag ${REPOSITORY_NAME}:${IMAGE_TAG} ${REPOSITORY_NAME}:latest"
                 }
             }
         }
@@ -32,7 +37,7 @@ pipeline {
     
     post {
         success {
-            echo 'Build stage completed successfully!'
+            echo 'Build and tagging completed successfully!'
         }
         failure {
             echo 'Build stage failed!'
