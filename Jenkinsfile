@@ -39,12 +39,11 @@ pipeline {
             }
         }
 
-        stage('Test') {
+        stage('CI Unit Tests') {
             steps {
                 script {
-                    echo "Running unit and integration tests from tests directory..."
+                    echo "Running CI unit test (calculator logic) for both PR and main..."
                     sh "docker run --rm -w /app ${REPOSITORY_NAME}:${IMAGE_TAG} python -m unittest tests/test_calculator_logic.py > unit_test_results.txt || (cat unit_test_results.txt && exit 1)"
-                    sh "docker run --rm -w /app ${REPOSITORY_NAME}:${IMAGE_TAG} python -m unittest tests/test_calculator_app_integration.py > integration_test_results.txt || (cat integration_test_results.txt && exit 1)"
                 }
             }
         }
@@ -90,6 +89,18 @@ pipeline {
             }
         }
 
+        stage('CD Integration Test') {
+            when {
+                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' }
+            }
+            steps {
+                script {
+                    echo "Running CD integration test (app integration) before deployment..."
+                    sh "docker run --rm -w /app ${REPOSITORY_NAME}:${IMAGE_TAG} python -m unittest tests/test_calculator_app_integration.py > integration_test_results.txt || (cat integration_test_results.txt && exit 1)"
+                }
+            }
+        }
+
         stage('Deploy to Production EC2') {
             when {
                 expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' }
@@ -103,9 +114,7 @@ pipeline {
                     ]) {
                         sh '''
                             chmod 600 $SSH_KEY_FILE
-                            # שליפת הסיסמה באג'נט והעברתה בצורה בטוחה ללא שגיאת אינטרפולציה של ג'נקינס
                             ECR_PASS=$(aws ecr get-login-password --region ${AWS_REGION})
-                            
                             ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "
                                 echo '${ECR_PASS}' | docker login --username AWS --password-stdin ${REGISTRY_URL} && \
                                 docker pull ${REGISTRY_URL}/${REPOSITORY_NAME}:latest && \
@@ -127,8 +136,7 @@ pipeline {
             steps {
                 script {
                     echo "Probing service health endpoint with retries and backoff..."
-                    withCredentials([file(credentialsId: 'ssh-key-ec2', variable: 'SSH_KEY_FILE')]) {
-                        // לולאת בדיקת בריאות עם עד 5 ניסיונות והמתנה (Backoff) של 5 שניות
+                    withCredentials([file(credentialsId: 'b7943e0f-cf0c-4a33-8d0f-eda0073045d8', variable: 'SSH_KEY_FILE')]) {
                         sh """
                             chmod 600 \$SSH_KEY_FILE
                             ssh -i \$SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
@@ -163,7 +171,7 @@ pipeline {
         failure {
             script {
                 try {
-                    githubNotify status: 'FAILURE', description: 'Pipeline or Health Check failed!', context: 'cd_practise_multy'
+                    githubNotify status: 'FAILURE', description: 'Pipeline or test failed!', context: 'cd_practise_multy'
                 } catch(Exception e) {
                     echo "Could not send failure notification: ${e.message}"
                 }
