@@ -13,7 +13,7 @@ pipeline {
         IMAGE_TAG       = "${env.CHANGE_ID != null && env.CHANGE_ID != '' ? 'pr-' + env.CHANGE_ID + '-' + env.BUILD_NUMBER : 'v-' + env.BUILD_NUMBER}"
         REGISTRY_URL    = "${env.AWS_ACC_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com"
         
-        EC2_HOST        = '34.239.116.186'
+        EC2_HOST        = '44.202.91.190'
         EC2_USER        = 'ubuntu'
         CONTAINER_NAME  = 'my-running-app'
     }
