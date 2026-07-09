@@ -34,6 +34,8 @@ pipeline {
                 script {
                     echo "Building Docker image with tag ${IMAGE_TAG} and latest..."
                     sh "docker build --no-cache -t ${REPOSITORY_NAME}:${IMAGE_TAG} ."
+                    // תיקון: מחיקת התיוג הקודם של latest לפני יצירת החדש למניעת שגיאת AlreadyExists
+                    sh "docker rmi -f ${REPOSITORY_NAME}:latest || true"
                     sh "docker tag ${REPOSITORY_NAME}:${IMAGE_TAG} ${REPOSITORY_NAME}:latest"
                 }
             }
@@ -62,6 +64,7 @@ pipeline {
                         sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${REGISTRY_URL}"
                         
                         echo "Tagging image for ECR with ${IMAGE_TAG}..."
+                        sh "docker rmi -f ${REGISTRY_URL}/${REPOSITORY_NAME}:latest || true"
                         sh "docker tag ${REPOSITORY_NAME}:${IMAGE_TAG} ${REGISTRY_URL}/${REPOSITORY_NAME}:${IMAGE_TAG}"
                         sh "docker tag ${REPOSITORY_NAME}:${IMAGE_TAG} ${REGISTRY_URL}/${REPOSITORY_NAME}:latest"
                         
@@ -136,7 +139,7 @@ pipeline {
             steps {
                 script {
                     echo "Probing service health endpoint with retries and backoff..."
-                    withCredentials([file(credentialsId: 'b7943e0f-cf0c-4a33-8d0f-eda0073045d8', variable: 'SSH_KEY_FILE')]) {
+                    withCredentials([file(credentialsId: 'ssh-key-ec2', variable: 'SSH_KEY_FILE')]) {
                         sh """
                             chmod 600 \$SSH_KEY_FILE
                             ssh -i \$SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} '
