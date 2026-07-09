@@ -12,6 +12,10 @@ pipeline {
         REPOSITORY_NAME = 'a_y/cd'
         IMAGE_TAG       = "${env.CHANGE_ID != null && env.CHANGE_ID != '' ? 'pr-' + env.CHANGE_ID + '-' + env.BUILD_NUMBER : 'v-' + env.BUILD_NUMBER}"
         REGISTRY_URL    = "${env.AWS_ACC_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com"
+        
+        EC2_HOST        = '34.239.116.186'
+        EC2_USER        = 'ubuntu'
+        CONTAINER_NAME  = 'my-running-app'
     }
 
     stages {
@@ -38,7 +42,6 @@ pipeline {
             steps {
                 script {
                     echo "Running unit and integration tests from tests directory..."
-                    // הרצת הטסטים ושמירת הפלט לקבצים כדי שנוכל לשמור אותם כ-Artifacts
                     sh "docker run --rm -w /app ${REPOSITORY_NAME}:${IMAGE_TAG} python -m unittest tests/test_calculator_logic.py > unit_test_results.txt || (cat unit_test_results.txt && exit 1)"
                     sh "docker run --rm -w /app ${REPOSITORY_NAME}:${IMAGE_TAG} python -m unittest tests/test_calculator_app_integration.py > integration_test_results.txt || (cat integration_test_results.txt && exit 1)"
                 }
@@ -60,13 +63,12 @@ pipeline {
                         
                         echo "Tagging image for ECR with ${IMAGE_TAG}..."
                         sh "docker tag ${REPOSITORY_NAME}:${IMAGE_TAG} ${REGISTRY_URL}/${REPOSITORY_NAME}:${IMAGE_TAG}"
-                        sh "docker tag ${REPOSITORY_NAME}:${IMAGE_TAG} ${REGISTRY_URL}/${REPOSITORY_NAME}:latest"
+                        sh "docker tag ${REPOSITORY_NAME}:${IMAGE_TAG} ${REPOSITORY_NAME}:latest"
                         
                         echo "Pushing image to ECR..."
                         sh "docker push ${REGISTRY_URL}/${REPOSITORY_NAME}:${IMAGE_TAG}"
                         sh "docker push ${REGISTRY_URL}/${REPOSITORY_NAME}:latest"
 
-                        // הצגת כתובת האימג' במפורש בלוגים של ג'נקינס (דרישת DoD)
                         echo "===================================================="
                         echo " PUSHED IMAGE REFERENCE: ${REGISTRY_URL}/${REPOSITORY_NAME}:${IMAGE_TAG}"
                         echo "===================================================="
@@ -74,18 +76,60 @@ pipeline {
                 }
             }
         }
+
+        stage('Notify GitHub PR Success') {
+            when {
+                expression { env.CHANGE_ID != null && env.CHANGE_ID != '' }
+            }
+            steps {
+                script {
+                    // עדכון סטטוס מפורש ל-GitHub (דורש את פלאגין ה-GitHub / Github Notify)
+                    // במידה והפלאגין מותקן בג'נקינס, הפקודה הבאה מעדכנת את ה-PR ב-GitHub ל-SUCCESS
+                    try {
+                        step([$class: 'GitHubCommitStatusSetter', 
+                              reposSource: [$class: 'ManuallyEnteredRepositorySource', repoUrl: 'https://github.com/a_y/cd'],
+                              commitStatusContexts: [[context: 'CI/CD Pipeline', message: 'Tests passed and image pushed successfully', state: 'SUCCESS']]])
+                    } catch (err) {
+                        echo "GitHub notification step skipped or handled by branch source plugin: ${err.message}"
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Production EC2') {
+            when {
+                expression { env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master' }
+            }
+            steps {
+                script {
+                    echo "Deploying the latest image to Production EC2 host..."
+                    withCredentials([file(credentialsId: 'b7943e0f-cf0c-4a33-8d0f-eda0073045d8', variable: 'SSH_KEY_FILE')]) {
+                        sh """
+                            chmod 600 \$SSH_KEY_FILE
+                            ssh -i \$SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "\
+                                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${REGISTRY_URL} && \
+                                docker pull ${REGISTRY_URL}/${REPOSITORY_NAME}:latest && \
+                                docker stop ${CONTAINER_NAME} || true && \
+                                docker rm ${CONTAINER_NAME} || true && \
+                                docker run -d --name ${CONTAINER_NAME} -p 5000:5000 ${REGISTRY_URL}/${REPOSITORY_NAME}:latest \
+                            "
+                        """
+                    }
+                    echo "Deployment completed successfully. New release is now live!"
+                }
+            }
+        }
     }
     
     post {
         always {
-            // שמירת תוצאות הטסטים בתור Artifacts בג'נקינס תחת כל מצב (הצלחה או כישלון)
             archiveArtifacts artifacts: '*_test_results.txt', allowEmptyArchive: true
         }
         success {
-            echo 'CI pipeline completed successfully!'
+            echo 'Pipeline (CI/CD) completed successfully!'
         }
         failure {
-            echo 'CI pipeline failed!'
+            echo 'Pipeline failed!'
         }
     }
 }
