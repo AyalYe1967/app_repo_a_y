@@ -84,17 +84,18 @@ pipeline {
             }
             steps {
                 script {
-                    echo "Reporting SUCCESS status to GitHub commit ${env.GIT_COMMIT}..."
+                    echo "Reporting SUCCESS status to GitHub commit..."
                     withCredentials([usernamePassword(credentialsId: 'github-token', 
                                                       usernameVariable: 'GH_USER_UNUSED', 
                                                       passwordVariable: 'GH_TOKEN')]) {
-                        sh """
+                        // תיקון: העברת הטוקן בבטחה ומניעת בעיות אינטרפולציה של ה-SHA על ידי שימוש במשתנה סביבה פנימי
+                        sh '''
                             curl -X POST \
-                            -H "Authorization: token ${GH_TOKEN}" \
+                            -H "Authorization: token $GH_TOKEN" \
                             -H "Accept: application/vnd.github.v3+json" \
-                            https://api.github.com/repos/${GITHUB_REPO}/statuses/${env.GIT_COMMIT} \
-                            -d '{"state": "success", "target_url": "${env.BUILD_URL}", "description": "Build, tests and push passed successfully!", "context": "col_app_pipeline"}'
-                        """
+                            https://api.github.com/repos/${GITHUB_REPO}/statuses/${GIT_COMMIT} \
+                            -d '{"state": "success", "target_url": "'"${BUILD_URL}"'", "description": "Build, tests and push passed successfully!", "context": "col_app_pipeline"}'
+                        '''
                     }
                 }
             }
@@ -107,7 +108,7 @@ pipeline {
             steps {
                 script {
                     echo "Deploying the latest image to Production EC2 host..."
-                    withCredentials([file(credentialsId: 'ssh-key-ec2', variable: 'SSH_KEY_FILE')]) {
+                    withCredentials([file(credentialsId: 'b7943e0f-cf0c-4a33-8d0f-eda0073045d8', variable: 'SSH_KEY_FILE')]) {
                         sh """
                             chmod 600 \$SSH_KEY_FILE
                             ssh -i \$SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "\
@@ -136,13 +137,13 @@ pipeline {
                         withCredentials([usernamePassword(credentialsId: 'github-token', 
                                                           usernameVariable: 'GH_USER_UNUSED', 
                                                           passwordVariable: 'GH_TOKEN')]) {
-                            sh """
+                            sh '''
                                 curl -X POST \
-                                -H "Authorization: token ${GH_TOKEN}" \
+                                -H "Authorization: token $GH_TOKEN" \
                                 -H "Accept: application/vnd.github.v3+json" \
-                                https://api.github.com/repos/${GITHUB_REPO}/statuses/${env.GIT_COMMIT} \
-                                -d '{"state": "failure", "target_url": "${env.BUILD_URL}", "description": "Pipeline or tests failed!", "context": "col_app_pipeline"}'
-                            """
+                                https://api.github.com/repos/${GITHUB_REPO}/statuses/${GIT_COMMIT} \
+                                -d '{"state": "failure", "target_url": "'"${BUILD_URL}"'", "description": "Pipeline or tests failed!", "context": "col_app_pipeline"}'
+                            '''
                         }
                     } catch(Exception e) {
                         echo "Failed to report failure status: ${e.message}"
