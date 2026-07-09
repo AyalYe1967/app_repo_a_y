@@ -85,7 +85,6 @@ pipeline {
             steps {
                 script {
                     echo "Reporting SUCCESS status to GitHub commit ${env.GIT_COMMIT}..."
-                    // התאמה לסוג ה-Credential: Username with password (משתמש וסיסמה שבה הסיסמה היא הטוקן)
                     withCredentials([usernamePassword(credentialsId: 'github-token', 
                                                       usernameVariable: 'GH_USER_UNUSED', 
                                                       passwordVariable: 'GH_TOKEN')]) {
