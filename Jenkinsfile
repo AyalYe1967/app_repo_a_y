@@ -96,25 +96,24 @@ pipeline {
             }
             steps {
                 script {
-                    echo "Deploying image using agent-side ECR login and remote execution..."
+                    echo "Deploying latest image to Production EC2 host..."
                     withCredentials([
                         usernamePassword(credentialsId: 'aws-access-key', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY'),
                         file(credentialsId: 'ssh-key-ec2', variable: 'SSH_KEY_FILE')
                     ]) {
-                        // מבצעים את ה-Login ל-ECR באג'נט, ומעבירים את הטוקן והאימג' לשרת המרוחק בצורה נקייה
-                        sh """
-                            chmod 600 \$SSH_KEY_FILE
-                            # קבלת סיסמת ECR מהאג'נט ויצירת פקודת רץ מרוחקת שאינה תלויה ב-AWS CLI על השרת
-                            ECR_PASSWORD=\$(aws ecr get-login-password --region ${AWS_REGION})
+                        sh '''
+                            chmod 600 $SSH_KEY_FILE
+                            # שליפת הסיסמה באג'נט והעברתה בצורה בטוחה ללא שגיאת אינטרפולציה של ג'נקינס
+                            ECR_PASS=$(aws ecr get-login-password --region ${AWS_REGION})
                             
-                            ssh -i \$SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "\
-                                echo '${ECR_PASSWORD}' | docker login --username AWS --password-stdin ${REGISTRY_URL} && \
+                            ssh -i $SSH_KEY_FILE -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "
+                                echo '${ECR_PASS}' | docker login --username AWS --password-stdin ${REGISTRY_URL} && \
                                 docker pull ${REGISTRY_URL}/${REPOSITORY_NAME}:latest && \
                                 docker stop ${CONTAINER_NAME} || true && \
                                 docker rm ${CONTAINER_NAME} || true && \
-                                docker run -d --name ${CONTAINER_NAME} -p ${APP_PORT}:${APP_PORT} ${REGISTRY_URL}/${REPOSITORY_NAME}:latest \
+                                docker run -d --name ${CONTAINER_NAME} -p ${APP_PORT}:${APP_PORT} ${REGISTRY_URL}/${REPOSITORY_NAME}:latest
                             "
-                        """
+                        '''
                     }
                     echo "Deployment completed successfully!"
                 }
